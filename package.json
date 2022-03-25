@@ -20,6 +20,10 @@
     "@cosmjs/tendermint-rpc": "^0.27.1",
     "@tendermint/amino-js": "^0.6.2",
     "axios": "^0.26.1",
+    "cosmjs-types": "^0.4.1",
     "dotenv": "^16.0.0"
+  },
+  "engines": {
+    "node": ">=15.0.0"
   }
 }

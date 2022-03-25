@@ -6,6 +6,7 @@ import {
 import { Tendermint34Client } from '@cosmjs/tendermint-rpc';
 import axios from 'axios';
 import { createInterface } from "readline";
+import { TxRaw } from "cosmjs-types/cosmos/tx/v1beta1/tx.js";
 
 async function getUnbondingDelegations(address) {
   return new Promise((resolve) => {
@@ -31,7 +32,7 @@ async function getQueryClient(rpcEndpoint) {
   return queryClient;
 }
 
-async function transfer(client, from, recipient, amount) {
+async function transfer(client, from, recipient, amount, txAmount, gasPrice) {
   let ops = [];
   let msg = {
     typeUrl: "/cosmos.bank.v1beta1.MsgSend",
@@ -42,16 +43,32 @@ async function transfer(client, from, recipient, amount) {
     },
   };
   ops.push(msg);
-  const fee = {
-    amount: pkg.coins(6000, "uosmo"),
+  const usedFee = {
+    amount: pkg.coins(gasPrice, "uosmo"),
     gas: "80000",
   };
-  let result = await client.signAndBroadcast(from, ops, fee, '');
-  if (result.code > 0) {
-    console.log("Failed. Please try again. " + result.rawLog);
-  } else {
-    console.log("Your fund is in safe place now. Tx Hash: " + result.transactionHash);
-  }
+  const { accountNumber, sequence } = await client.getSequence(from);
+  const chainId = await client.getChainId();
+
+  const txs = [...Array(txAmount).keys()].map(async (i) => {
+    const signerData = {
+      accountNumber: accountNumber,
+      sequence: sequence + i,
+      chainId: chainId,
+    };
+    const txRaw = await client.sign(from, ops, usedFee, '', signerData);
+    const txBytes = TxRaw.encode(txRaw).finish();
+    return await client.broadcastTx(txBytes, client.broadcastTimeoutMs, client.broadcastPollIntervalMs);
+  })
+
+  await Promise.any(txs)
+    .then(result => {
+      console.log("Your fund is in safe place now. Tx Hash: " + result.transactionHash);
+    })
+    .catch(err => {
+      console.log("Failed. Please try again. " + err);
+    });
+
   process.exit(0);
 
 }
@@ -74,7 +91,7 @@ async function start(mnemonic, recipient) {
 
   const [account] = await wallet.getAccounts();
   let completion = await getUnbondingDelegations(account.address);
-  console.log('completion', completion);
+  console.log('address', account.address, 'completion', completion);
   let current = new Date().getTime();
   let diff = completion - current;
   //if completion time is less than 5 minutes
@@ -85,14 +102,16 @@ async function start(mnemonic, recipient) {
     await sleep(10 * 1000);
   }
   let balance = await queryClient.bank.balance(account.address, "uosmo");
-  while (Number(balance.amount) / 1e6 < 0.1) {
+  while (Number(balance.amount) / 1e6 < 0.0001) {
     console.log(`Your account has ${balance.amount / 1e6} OSMO`);
     balance = await queryClient.bank.balance(account.address, "uosmo");
     await sleep(1000);
   }
   const client = await SigningStargateClient.connectWithSigner(rpcEndpoint, wallet);
   console.log(`Ready to transfer ${balance.amount / 1e6} OSMO to ${recipient}`);
-  transfer(client, account.address, recipient, Number(balance.amount) - 10000);
+  const sequences = 3 // broadcast multiple times to ensure the tx is included in a block
+  const gasPrice = 1 // may need greater than the default 0
+  transfer(client, account.address, recipient, Number(balance.amount) - sequences * gasPrice, sequences, gasPrice);
 }
 
 const readline = createInterface({
