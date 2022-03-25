@@ -90,6 +90,7 @@ async function start(mnemonic, recipient) {
   );
 
   const [account] = await wallet.getAccounts();
+  const client = await SigningStargateClient.connectWithSigner(rpcEndpoint, wallet);
   let completion = await getUnbondingDelegations(account.address);
   console.log('address', account.address, 'completion', completion);
   let current = new Date().getTime();
@@ -107,7 +108,6 @@ async function start(mnemonic, recipient) {
     balance = await queryClient.bank.balance(account.address, "uosmo");
     await sleep(1000);
   }
-  const client = await SigningStargateClient.connectWithSigner(rpcEndpoint, wallet);
   console.log(`Ready to transfer ${balance.amount / 1e6} OSMO to ${recipient}`);
   const sequences = 3 // broadcast multiple times to ensure the tx is included in a block
   const gasPrice = 1 // may need greater than the default 0
